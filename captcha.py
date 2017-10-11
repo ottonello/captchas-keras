@@ -23,67 +23,55 @@ height = 60
 batch_size=256
 epochs=400
 
-
 csv_labels=pandas.read_csv(labels_file, na_filter=False)
 
 # load all files into memory
-X_train = []
-y_train = []
-
-X_test = []
-y_test = []
-
-train_to_test = 0.1
-
-for index, row in csv_labels.iterrows():
-    filename=row['path']
-    if isfile(filename):
-        image_data = ndimage.imread(filename)
-        captcha_text = row['inputted_captcha']
-        if captcha_text != captcha_text:
-            print('Error loading {}'.format(captcha_text))
-            raise Exception()
-        if index > train_to_test * len(csv_labels):
-            X_train.append(image_data)
-            y_train.append(captcha_text)
-        else:
-            X_test.append(image_data)
-            y_test.append(captcha_text)
+X_train = csv_labels['path']
+y_train = csv_labels['inputted_captcha']
+# unravel string
+y_train = np.array([[i for i in x] for x in y_train])
 
 train_samples=len(X_train)
-test_samples=len(X_test)
+steps = train_samples / batch_size
+
 print('Train samples: {}'.format(len(X_train)))
-print('Test samples:  {}'.format(len(X_test)))
 
-# input = 60x160x3  (RGB image)
-# output = 5x57     (5 chars one-hot encoded)
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder
+lbl_enc=LabelEncoder()
+# transform to integer
+y_int = lbl_enc.fit_transform(y_train.ravel()).reshape(*y_train.shape)
+one_hot_enc=OneHotEncoder()
+# transform to binary
+y_train = one_hot_enc.fit_transform(y_int).toarray()
 
-# Normalize the data features to the variable X_normalized
-print("Input shape: {}".format(np.shape(X_train)))
-
+print(lbl_enc.classes_  )
+print(len(lbl_enc.classes_))
+ 
 def normalize(x):
     a = -0.5
     b = 0.5
     return a + ( (x * (b - a) )/ 255 )
 
-X_normalized = np.array([normalize(x) for x in X_train])
-assert math.isclose(np.min(X_normalized), -0.5, abs_tol=1e-5) and math.isclose(np.max(X_normalized), 0.5, abs_tol=1e-5), 'The range of the training data is: {} to {}.  It must be -0.5 to 0.5'.format(np.min(X_normalized), np.max(X_normalized))
-print('Normalization OK 👍.')
+def batch_generator(batch_size):
+   while 1:
+        for i in range(0, len(X_train), batch_size):
+            stop_ = min(i+batch_size, len(X_train))
+            x_batch = []
+            y_batch = y_train[i:stop_]
+            for x in range(i, stop_):
+                filename = X_train[x]
+                if isfile(filename):
+                    image_data = ndimage.imread(filename)
+                    x_batch.append(image_data)
 
-from sklearn.preprocessing import LabelEncoder, OneHotEncoder
+            # Normalize the data features to the variable X_normalized
+            x_batch = np.array([normalize(x) for x in x_batch])
+            yield x_batch, y_batch
 
-y_temp = np.array([[i for i in x] for x in y_train])
-# transform to integer
-lbl_enc=LabelEncoder()
-one_hot_enc=OneHotEncoder()
-y_int = lbl_enc.fit_transform(y_temp.ravel()).reshape(*y_temp.shape)
-# transform to binary
-y_one_hot = one_hot_enc.fit_transform(y_int).toarray()
 
-assert np.shape(y_one_hot) == (train_samples, n_output * n_classes)
-print('One-hot encoding OK 👍')
+# input = 60x160x3  (RGB image)
+# output = 5x57     (5 chars one-hot encoded)
 
-print(lbl_enc.classes_)
 
 from keras.models import Sequential
 from keras.layers.core import Dense, Activation, Flatten, Dropout
@@ -120,9 +108,7 @@ model.add(Activation('softmax'))
 model.compile('adam', 'categorical_crossentropy', ['accuracy'])
 
 assert model.layers[0].input_shape == (None, height, width, 3), 'First layer input shape is wrong, it should be (60,160,3)'
-print(np.shape(X_normalized))
-print(np.shape(y_one_hot))
-history = model.fit(X_normalized, y_one_hot, batch_size=batch_size, epochs=epochs, validation_split=0.2)
+history = model.fit_generator(batch_generator(batch_size=batch_size), epochs=epochs, steps_per_epoch=steps)
 
 import matplotlib.pyplot as plt
 # summarize history for accuracy
@@ -143,20 +129,20 @@ plt.xlabel('epoch')
 plt.legend(['train', 'test'], loc='upper left')
 plt.savefig('loss.png')
 
-X_test = np.array([normalize(x) for x in X_test])
-y_temp = np.array([[i for i in x] for x in y_test])
-# transform to integer
-y_int = lbl_enc.transform(y_temp.ravel()).reshape(*y_temp.shape)
-# transform to binary
-y_one_hot = one_hot_enc.transform(y_int).toarray()
+#X_test = np.array([normalize(x) for x in X_test])
+#y_temp = np.array([[i for i in x] for x in y_test])
+## transform to integer
+#y_int = lbl_enc.transform(y_temp.ravel()).reshape(*y_temp.shape)
+## transform to binary
+#y_one_hot = one_hot_enc.transform(y_int).toarray()
 
-ev = model.evaluate(X_test, y_one_hot, batch_size=32, verbose=1, sample_weight=None)
-print()
-print(model.metrics_names)
-print(ev)
+#ev = model.evaluate(X_test, y_one_hot, batch_size=32, verbose=1, sample_weight=None)
+#print()
+#print(model.metrics_names)
+#print(ev)
 
-for i in range(10):
-    print("Label:",y_test[i])
-    pred = model.predict(X_test[i].reshape((1,height, width,3)))
-    reshaped = pred.reshape((n_output, -1))
-    print([lbl_enc.classes_[np.argmax(x)] for x in reshaped])
+#for i in range(10):
+#    print("Label:",y_test[i])
+#    pred = model.predict(X_test[i].reshape((1,height, width,3)))
+#    reshaped = pred.reshape((n_output, -1))
+#    print([lbl_enc.classes_[np.argmax(x)] for x in reshaped])
