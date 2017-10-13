@@ -9,7 +9,7 @@ n = 2
 w= 60
 h= 60
 noise =0.1
-gen= 5000
+gen= 20000
 fonts = [
     ImageFont.truetype("lucida sans italic.ttf", 25),
     ImageFont.truetype("Lucida Sans Bold.ttf", 25),

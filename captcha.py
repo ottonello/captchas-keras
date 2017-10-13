@@ -11,6 +11,13 @@ import pandas
 import os
 from scipy import ndimage
 
+
+from keras.models import Sequential
+from keras.layers.core import Dense, Activation, Flatten, Dropout
+from keras.layers.convolutional import Conv2D, Convolution2D
+from keras.layers.pooling import MaxPooling2D
+
+
 labels_file = 'data/captcha_labels.csv'
 
 # Number of  characters of output
@@ -20,47 +27,45 @@ n_classes = 57
 
 width = 60
 height = 60
-batch_size=256
-epochs=400
+batch_size=200
+epochs=10
+validation = 0.1
 
 csv_labels=pandas.read_csv(labels_file, na_filter=False)
 
 # load all files into memory
-X_train = csv_labels['path']
-y_train = csv_labels['inputted_captcha']
-# unravel string
-y_train = np.array([[i for i in x] for x in y_train])
+X = csv_labels['path']
+y = csv_labels['inputted_captcha']
+print(type(X))
 
-train_samples=len(X_train)
-steps = train_samples / batch_size
-
-print('Train samples: {}'.format(len(X_train)))
-
+# One hot encode each character
+y = np.array([[i for i in x] for x in y])
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 lbl_enc=LabelEncoder()
-# transform to integer
-y_int = lbl_enc.fit_transform(y_train.ravel()).reshape(*y_train.shape)
+y_int = lbl_enc.fit_transform(y.ravel()).reshape(*y.shape)
 one_hot_enc=OneHotEncoder()
 # transform to binary
-y_train = one_hot_enc.fit_transform(y_int).toarray()
+y = one_hot_enc.fit_transform(y_int).toarray()
 
-print(lbl_enc.classes_  )
-print(len(lbl_enc.classes_))
- 
+total_samples = len(y)
+train_samples = int(total_samples*(1-validation))
+validation_samples = total_samples - train_samples
+steps = int(train_samples / batch_size)
+
 def normalize(x):
     a = -0.5
     b = 0.5
     return a + ( (x * (b - a) )/ 255 )
 
-def batch_generator(batch_size):
+def batch_generator(X_data, y_data, first_index, last_index, batch_size, debug=False):
    while 1:
-        for i in range(0, len(X_train), batch_size):
-            stop_ = min(i+batch_size, len(X_train))
+        for i in range(0, len(X_data), batch_size):
+            stop_ = min(i+batch_size, len(X_data))
             x_batch = []
-            y_batch = y_train[i:stop_]
+            y_batch = y_data[i:stop_]
             for x in range(i, stop_):
-                filename = X_train[x]
-                if isfile(filename):
+               filename = X_data[x]
+               if isfile(filename):
                     image_data = ndimage.imread(filename)
                     x_batch.append(image_data)
 
@@ -72,11 +77,9 @@ def batch_generator(batch_size):
 # input = 60x160x3  (RGB image)
 # output = 5x57     (5 chars one-hot encoded)
 
-
-from keras.models import Sequential
-from keras.layers.core import Dense, Activation, Flatten, Dropout
-from keras.layers.convolutional import Conv2D, Convolution2D
-from keras.layers.pooling import MaxPooling2D
+print('Train samples: {}'.format(train_samples))
+print('Validation samples: {}'.format(validation_samples))
+print('Batch Size: {}, steps: {}'.format(batch_size, steps))
 
 model = Sequential()
 model.add(Conv2D(32, (3, 3), padding="valid", input_shape=(height, width, 3)))
@@ -108,7 +111,12 @@ model.add(Activation('softmax'))
 model.compile('adam', 'categorical_crossentropy', ['accuracy'])
 
 assert model.layers[0].input_shape == (None, height, width, 3), 'First layer input shape is wrong, it should be (60,160,3)'
-history = model.fit_generator(batch_generator(batch_size=batch_size), epochs=epochs, steps_per_epoch=steps)
+validation_steps = int(validation_samples/batch_size)
+print('Validation Steps={}'.format(validation_steps))
+history = model.fit_generator(batch_generator(X, y, 0, train_samples, batch_size=batch_size), 
+                              steps, epochs=epochs,
+                              validation_data=batch_generator(X, y, train_samples, total_samples, batch_size, debug=True), validation_steps=validation_steps,
+                              )
 
 import matplotlib.pyplot as plt
 # summarize history for accuracy
@@ -117,7 +125,7 @@ plt.plot(history.history['val_acc'])
 plt.title('model accuracy')
 plt.ylabel('accuracy')
 plt.xlabel('epoch')
-plt.legend(['train', 'test'], loc='upper left')
+plt.legend(['train', 'validation'], loc='upper left')
 plt.savefig('accuracy.png')
 # summarize history for loss
 plt.clf()
@@ -126,7 +134,7 @@ plt.plot(history.history['val_loss'])
 plt.title('model loss')
 plt.ylabel('loss')
 plt.xlabel('epoch')
-plt.legend(['train', 'test'], loc='upper left')
+plt.legend(['train', 'validation'], loc='upper left')
 plt.savefig('loss.png')
 
 #X_test = np.array([normalize(x) for x in X_test])
